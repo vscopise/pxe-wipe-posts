@@ -1,62 +1,82 @@
 <?php
 // If this file is called directly, abort.
-if ( ! defined( 'WPINC' ) ) {
-	die;
+if (!defined('WPINC')) {
+    die;
 }
 
-$year = filter_input(INPUT_POST, 'year');
-$month = filter_input(INPUT_POST, 'month');
-$day = filter_input(INPUT_POST, 'day');
-$day = ($day == 0) ? '' : $day;
+//$year = filter_input(INPUT_POST, 'year');
+//$year = sprintf("%04d", filter_input(INPUT_POST, 'year'));
+$year = filter_input(INPUT_POST, 'year') == '' ? '' : sprintf("%04d", filter_input(INPUT_POST, 'year'));
+//$month = filter_input(INPUT_POST, 'month');
+$month = sprintf("%02d", filter_input(INPUT_POST, 'month'));
+//$day = (filter_input(INPUT_POST, 'day') == 0) ? '' : $day;
+$day = sprintf("%02d", filter_input(INPUT_POST, 'day'));
+$remote_url = filter_input(INPUT_POST, 'remote_url');
+
 ?>
 <div class="wrap">
     <h2>Purgar entradas de la base de datos</h2>
     <div id="pxe_wipe_post">
-    <?php if ( '' != $year && '' != $month ) : ?>
-    <?php 
-            $query_post = new WP_Query(array(
-                'date_query' => array(
-                    array(
-                        'year'  => $year,
-                        'month' => $month,
-                        'day' => $day
-                    ),
-                ),
-                'posts_per_page' => -1
+        <?php if ('' != $year && '' != $month) : ?>
+            <?php
+            $from = $day == '00' ? '01' : $day;
+            $to = $day == '00' ? '31' : $day;
+            $have_posts = true;
+            $page = 1;
+            $posts = array();
+            $data_posts = array();
+            $body_content = array();
+            while ($have_posts) {
+                $url = $remote_url . "/wp-json/wp/v2/posts?after={$year}-{$month}-{$from}T00:00:00&before={$year}-{$month}-{$to}T23:59:59&page={$page}";
+                $response = wp_remote_get($url, array('timeout' => 120));
+                if (is_array($response) && !is_wp_error($response)) {
+                    $body = wp_remote_retrieve_body($response);
+                    $body_content = json_decode($body, true);
+                    $invalid_page_number = false;
+                    if(array_key_exists('code', $body_content)) {
+                        $invalid_page_number = 'rest_post_invalid_page_number' == $body_content['code'];
+                    }
+                    if (0 == sizeof($body_content) || $invalid_page_number) {
+                        $have_posts = false;
+                    } else {
+                        $posts = array_merge($posts, array_column($body_content, 'id'));
+                        $data_posts = array_merge($data_posts, $body_content);
+                    }
+                }
+                $page++;
+            }
+            update_option('pxe_wipe_posts_options', array(
+                'remote_url' => $remote_url,
+                'year' => $year,
+                'data_posts' => $data_posts,
             ));
-            if ( $query_post->have_posts() ) : 
-                while ( $query_post->have_posts() ) : $query_post->the_post();
-                    $posts[] = get_the_ID();
-                endwhile; 
-                ?>
-                <input type="hidden" name="posts" id="posts_id" value="<?php echo json_encode( $posts ) ?>" />
-                <p class="warning"><?php echo count( $posts ) ?> artículos para procesar.</p>
-                <p class="warning">Recuerde respaldar la Base de Datos...</p>
+
+
+            if (0 < sizeof($posts)) :
+            ?>
+                <input type="hidden" name="posts" id="posts_id" value="<?php echo json_encode($posts) ?>" />
+                <p class="warning"><?php echo count($posts) ?> artículos para procesar.</p>
+                <p class="warning">Recuerde respaldar la Base de Datos <em>(los artículos procesados serán eliminados de la BD)</em>...</p>
                 <div id="processing"></div>
-                <p><?php submit_button( 'Procesar !', 'primary', '', FALSE, array( 'id' => 'pxe_wp_process' ) ) ?></p>
-                <?php
+                <p><?php submit_button('Procesar !', 'primary', '', FALSE, array('id' => 'pxe_wp_process')) ?></p>
+            <?php
             else :
-                ?>
-                    <p>
-                        No hay artículos con este criterio
-                    </p>
-                    <p>
-                        <a href="<?php echo esc_html(admin_url('tools.php?page=pxe-wipe-posts')) ?>">Volver</a>
-                    </p>
-                <?php
+            ?>
+                <p>
+                    No hay artículos con este criterio
+                </p>
+                <p>
+                    <a href="<?php echo esc_html(admin_url('tools.php?page=pxe-wipe-posts')) ?>">Volver</a>
+                </p>
+            <?php
             endif;
-    ?>
+            ?>
     </div>
-    <?php else : ?>
-    <?php 
-            $query_year1 = new WP_Query( array( 'posts_per_page' => 1, 'order' => 'ASC' ) );
-            if ( $query_year1->have_posts() ) : while ( $query_year1->have_posts() ) : $query_year1->the_post();
-                    $year1 = get_the_date( 'Y' );
-            endwhile; endif;
-            $query_year2 = new WP_Query( array( 'posts_per_page' => 1 ) );
-            if ( $query_year2->have_posts() ) : while ( $query_year2->have_posts() ) : $query_year2->the_post();
-                    $year2 = get_the_date( 'Y' );
-            endwhile; endif;
+<?php else : ?>
+    <?php
+            $pxe_wipe_posts_options = get_option('pxe_wipe_posts_options', array('remote_url' => '', 'year' => ''));
+            $remote_url = $pxe_wipe_posts_options['remote_url'];
+            $year = $pxe_wipe_posts_options['year'];
     ?>
     <p>Se consulta si la entradas correspondientes a la fecha seleccionada ya fueron cacheadas y si es así se borra de la BD y se fija</p>
     <form method="post" action="<?php echo esc_html(admin_url('tools.php?page=pxe-wipe-posts')) ?>">
@@ -64,19 +84,17 @@ $day = ($day == 0) ? '' : $day;
         <table class="form-table">
             <tbody>
                 <tr>
+                    <th scope="row">Remote url</th>
+                    <td><input type="text" id="pxe_remote_url" name="remote_url" value="<?php echo $remote_url ?>" /></td>
+                </tr>
+                <tr>
                     <th scope="row">Año</th>
-                    <td>
-                        <select name="year" >
-                            <?php for ($year = $year1; $year <= $year2; $year++ ) : ?>
-                            <option><?php echo $year ?></option>
-                            <?php endfor; ?>
-                        </select>
-                    </td>
+                    <td><input type="text" id="pxe_year" name="year" value="<?php echo $year ?>" /></td>
                 </tr>
                 <tr>
                     <th scope="row">Mes</th>
                     <td>
-                        <select name="month" >
+                        <select name="month">
                             <option value="1">Enero</option>
                             <option value="2">Febrero</option>
                             <option value="3">Marzo</option>
@@ -95,7 +113,7 @@ $day = ($day == 0) ? '' : $day;
                 <tr>
                     <th scope="row">Día</th>
                     <td>
-                        <select name="day" >
+                        <select name="day">
                             <option value="0">todos</option>
                             <option value="1">1</option>
                             <option value="2">2</option>
@@ -134,9 +152,8 @@ $day = ($day == 0) ? '' : $day;
                 <tr>
                     <td><?php submit_button('Consultar') ?></td>
                 </tr>
-                
             </tbody>
         </table>
     </form>
-    <?php endif; ?>
+<?php endif; ?>
 </div>
