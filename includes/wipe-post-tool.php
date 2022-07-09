@@ -19,21 +19,28 @@ $remote_url = filter_input(INPUT_POST, 'remote_url');
     <div id="pxe_wipe_post">
         <?php if ('' != $year && '' != $month) : ?>
             <?php
-            $from = $day == '00' ? '01' : $day;
-            $to = $day == '00' ? '31' : $day;
+            if ('00' == $day) {
+                // mes completo
+                $after  = date('Y-m-d', strtotime("{$year}-{$month}-01 - 1 day")) . "T23:59:59";
+                $before = date('Y-m-d', strtotime("{$year}-{$month}-01 + 1 month")) . "T00:00:00";
+            } else {
+                // un solo día
+                $after  = date('Y-m-d', strtotime("{$year}-{$month}-{$day} - 1 day")) . "T23:59:59";
+                $before = date('Y-m-d', strtotime("{$year}-{$month}-{$day} + 1 day")) . "T00:00:00";
+            }
             $have_posts = true;
             $page = 1;
             $posts = array();
             $data_posts = array();
             $body_content = array();
             while ($have_posts) {
-                $url = $remote_url . "/wp-json/wp/v2/posts?after={$year}-{$month}-{$from}T00:00:00&before={$year}-{$month}-{$to}T23:59:59&page={$page}";
+                $url = $remote_url . "/wp-json/wp/v2/posts?after={$after}&before={$before}&page={$page}";
                 $response = wp_remote_get($url, array('timeout' => 120));
                 if (is_array($response) && !is_wp_error($response)) {
                     $body = wp_remote_retrieve_body($response);
                     $body_content = json_decode($body, true);
                     $invalid_page_number = false;
-                    if(array_key_exists('code', $body_content)) {
+                    if (array_key_exists('code', $body_content)) {
                         $invalid_page_number = 'rest_post_invalid_page_number' == $body_content['code'];
                     }
                     if (0 == sizeof($body_content) || $invalid_page_number) {
